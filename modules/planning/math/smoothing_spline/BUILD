@@ -57,6 +57,7 @@ cc_library(
     deps = [
         ":affine_constraint",
         ":spline_1d",
+        "//modules/common:log",
         "@eigen//:eigen",
     ],
 )
@@ -304,6 +305,30 @@ cc_test(
     deps = [
         ":spline_2d_solver",
         "//modules/planning/math:curve_math",
+        "@gtest//:main",
+    ],
+)
+
+cc_test(
+    name = "spline_2d_kernel_test",
+    size = "small",
+    srcs = [
+        "spline_2d_kernel_test.cc",
+    ],
+    deps = [
+        ":spline_2d_kernel",
+        "@gtest//:main",
+    ],
+)
+
+cc_test(
+    name = "spline_2d_constraint_test",
+    size = "small",
+    srcs = [
+        "spline_2d_constraint_test.cc",
+    ],
+    deps = [
+        ":spline_2d_constraint",
         "@gtest//:main",
     ],
 )

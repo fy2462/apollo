@@ -197,7 +197,7 @@ bool QpSplinePathGenerator::InitSpline(const double start_s,
                                        const double end_s) {
   uint32_t number_of_spline = static_cast<uint32_t>(
       (end_s - start_s) / qp_spline_path_config_.max_spline_length());
-  number_of_spline = std::max(2u, number_of_spline);
+  number_of_spline = std::max(1u, number_of_spline);
   common::util::uniform_slice(start_s, end_s, number_of_spline, &knots_);
   // spawn a new spline generator
   spline_generator_.reset(
@@ -207,7 +207,7 @@ bool QpSplinePathGenerator::InitSpline(const double start_s,
   double delta_s = qp_spline_path_config_.max_constraint_length();
   uint32_t constraint_num =
       std::max(3u, static_cast<uint32_t>((end_s - start_s) / delta_s));
-  delta_s = (end_s - start_s) / delta_s;
+  delta_s = (end_s - start_s) / constraint_num;
   common::util::uniform_slice(start_s + delta_s, end_s, constraint_num - 1,
                               &evaluated_s_);
   return true;
@@ -298,8 +298,9 @@ bool QpSplinePathGenerator::AddConstraint(
   }
 
   // add spline joint third derivative constraint
-  if (!spline_constraint->AddThirdDerivativeSmoothConstraint()) {
-    AERROR << "Add spline joint third derivative constraint failed!";
+  if (knots_.size() >= 3 &&
+      !spline_constraint->AddThirdDerivativeSmoothConstraint()) {
+    AERROR << "Add spline joint derivative constraint failed!";
     return false;
   }
   return true;

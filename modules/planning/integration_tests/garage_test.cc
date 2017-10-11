@@ -89,8 +89,7 @@ TEST_F(GarageTest, out_of_map) {
   FLAGS_test_localization_file = "out_of_map_localization.pb.txt";
   FLAGS_test_chassis_file = "out_of_map_chassis.pb.txt";
   PlanningTestBase::SetUp();
-  bool run_planning_success = RunPlanning("out_of_map", 0);
-  EXPECT_FALSE(run_planning_success);
+  RUN_GOLDEN_TEST;
 }
 
 /*
@@ -102,8 +101,7 @@ TEST_F(GarageTest, stop_over_line) {
   FLAGS_test_localization_file = seq_num + "_localization.pb.txt";
   FLAGS_test_chassis_file = seq_num + "_chassis.pb.txt";
   PlanningTestBase::SetUp();
-  bool run_planning_success = RunPlanning("stop_over_line", 0);
-  EXPECT_FALSE(run_planning_success);
+  RUN_GOLDEN_TEST;
 }
 
 }  // namespace planning
