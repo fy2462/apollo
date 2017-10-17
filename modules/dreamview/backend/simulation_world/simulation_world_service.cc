@@ -28,45 +28,49 @@
 #include "modules/common/proto/vehicle_signal.pb.h"
 #include "modules/common/time/time.h"
 #include "modules/common/util/file.h"
+#include "modules/common/util/points_downsampler.h"
 #include "modules/common/util/util.h"
 #include "modules/dreamview/backend/common/dreamview_gflags.h"
 #include "modules/dreamview/backend/util/trajectory_point_collector.h"
 #include "modules/dreamview/proto/simulation_world.pb.h"
 #include "modules/localization/proto/localization.pb.h"
 #include "modules/planning/proto/planning.pb.h"
+#include "modules/planning/proto/planning_internal.pb.h"
 #include "modules/prediction/proto/prediction_obstacle.pb.h"
-
-using apollo::common::Point3D;
-using apollo::common::adapter::AdapterManager;
-using apollo::common::adapter::MonitorAdapter;
-using apollo::common::adapter::LocalizationAdapter;
-using apollo::common::adapter::ChassisAdapter;
-using apollo::common::adapter::PerceptionObstaclesAdapter;
-using apollo::common::adapter::PlanningAdapter;
-using apollo::common::VehicleConfigHelper;
-using apollo::common::monitor::MonitorMessage;
-using apollo::common::monitor::MonitorMessageItem;
-using apollo::localization::LocalizationEstimate;
-using apollo::planning::ADCTrajectory;
-using apollo::common::TrajectoryPoint;
-using apollo::planning::DecisionResult;
-using apollo::planning::StopReasonCode;
-using apollo::canbus::Chassis;
-using apollo::perception::PerceptionObstacle;
-using apollo::perception::PerceptionObstacles;
-using apollo::prediction::PredictionObstacle;
-using apollo::prediction::PredictionObstacles;
-using apollo::routing::RoutingResponse;
-using apollo::common::time::Clock;
-using apollo::common::time::ToSecond;
-using apollo::common::time::millis;
-using apollo::common::util::GetProtoFromFile;
-using apollo::hdmap::MapPathPoint;
-
-using Json = nlohmann::json;
 
 namespace apollo {
 namespace dreamview {
+
+using apollo::canbus::Chassis;
+using apollo::common::Point3D;
+using apollo::common::TrajectoryPoint;
+using apollo::common::VehicleConfigHelper;
+using apollo::common::adapter::AdapterManager;
+using apollo::common::adapter::ChassisAdapter;
+using apollo::common::adapter::LocalizationAdapter;
+using apollo::common::adapter::MonitorAdapter;
+using apollo::common::adapter::PerceptionObstaclesAdapter;
+using apollo::common::adapter::PlanningAdapter;
+using apollo::common::monitor::MonitorMessage;
+using apollo::common::monitor::MonitorMessageItem;
+using apollo::common::time::Clock;
+using apollo::common::time::ToSecond;
+using apollo::common::time::millis;
+using apollo::common::util::DownsampleByAngle;
+using apollo::common::util::GetProtoFromFile;
+using apollo::hdmap::Path;
+using apollo::localization::LocalizationEstimate;
+using apollo::perception::PerceptionObstacle;
+using apollo::perception::PerceptionObstacles;
+using apollo::planning::ADCTrajectory;
+using apollo::planning::DecisionResult;
+using apollo::planning::StopReasonCode;
+using apollo::planning_internal::PlanningData;
+using apollo::prediction::PredictionObstacle;
+using apollo::prediction::PredictionObstacles;
+using apollo::routing::RoutingResponse;
+
+using Json = nlohmann::json;
 
 namespace {
 
@@ -122,6 +126,7 @@ void SetObstacleInfo(const PerceptionObstacle &obstacle, Object *world_object) {
   world_object->set_speed_heading(
       std::atan2(obstacle.velocity().y(), obstacle.velocity().x()));
   world_object->set_timestamp_sec(obstacle.timestamp());
+  world_object->set_confidence(obstacle.confidence());
 }
 
 void SetObstaclePolygon(const PerceptionObstacle &obstacle,
@@ -326,9 +331,22 @@ const SimulationWorld &SimulationWorldService::Update() {
     *world_.add_object() = kv.second;
   }
 
+  UpdateDelays();
+
   world_.set_sequence_num(world_.sequence_num() + 1);
 
   return world_;
+}
+
+void SimulationWorldService::UpdateDelays() {
+  auto *delays = world_.mutable_delay();
+  delays->set_chassis(AdapterManager::GetChassis()->GetDelayInMs());
+  delays->set_localization(AdapterManager::GetLocalization()->GetDelayInMs());
+  delays->set_perception_obstacle(
+      AdapterManager::GetPerceptionObstacles()->GetDelayInMs());
+  delays->set_planning(AdapterManager::GetPlanning()->GetDelayInMs());
+  delays->set_prediction(AdapterManager::GetPrediction()->GetDelayInMs());
+  // TODO(siyangy): Add traffic light delay when ready.
 }
 
 Json SimulationWorldService::GetUpdateAsJson(double radius) const {
@@ -436,8 +454,7 @@ void SimulationWorldService::UpdateSimulationWorld(const Chassis &chassis) {
   auto_driving_car->set_disengage_type(DeduceDisengageType(chassis));
 
   // Updates the timestamp with the timestamp inside the chassis message header.
-  world_.set_timestamp_sec(
-      std::max(world_.timestamp_sec(), chassis.header().timestamp_sec()));
+  world_.set_timestamp_sec(chassis.header().timestamp_sec());
 }
 
 Object &SimulationWorldService::CreateWorldObjectIfAbsent(
@@ -608,6 +625,11 @@ void SimulationWorldService::UpdateDecision(const DecisionResult &decision_res,
   }
 }
 
+void SimulationWorldService::UpdatePlanningData(const PlanningData &data) {
+  auto planning_data = world_.mutable_planning_data();
+  planning_data->CopyFrom(data);
+}
+
 template <>
 void SimulationWorldService::UpdateSimulationWorld(
     const ADCTrajectory &trajectory) {
@@ -616,6 +638,8 @@ void SimulationWorldService::UpdateSimulationWorld(
   UpdatePlanningTrajectory(trajectory);
 
   UpdateDecision(trajectory.decision(), header_time);
+
+  UpdatePlanningData(trajectory.debug().planning_data());
 
   world_.set_timestamp_sec(std::max(world_.timestamp_sec(), header_time));
 }
@@ -645,17 +669,28 @@ void SimulationWorldService::UpdateSimulationWorld(
     const RoutingResponse &routing_response) {
   auto header_time = routing_response.header().timestamp_sec();
 
-  std::vector<MapPathPoint> points;
-  if (!map_service_->GetPointsFromRouting(routing_response, &points)) {
+  std::vector<Path> paths;
+  if (!map_service_->GetPathsFromRouting(routing_response, &paths)) {
     return;
   }
 
-  world_.clear_route();
+  world_.clear_route_path();
   world_.set_routing_time(header_time);
-  for (const auto &point : points) {
-    PolygonPoint *route_point = world_.add_route();
-    route_point->set_x(point.x());
-    route_point->set_y(point.y());
+
+  for (const Path &path : paths) {
+    // Downsample the path points for frontend display.
+    // Angle threshold is about 5.72 degree.
+    constexpr double angle_threshold = 0.1;
+    std::vector<int> sampled_indices =
+        DownsampleByAngle(path.path_points(), angle_threshold);
+
+    RoutePath *route_path = world_.add_route_path();
+    for (int index : sampled_indices) {
+      const auto &path_point = path.path_points()[index];
+      PolygonPoint *route_point = route_path->add_point();
+      route_point->set_x(path_point.x());
+      route_point->set_y(path_point.y());
+    }
   }
 
   world_.set_timestamp_sec(std::max(world_.timestamp_sec(), header_time));

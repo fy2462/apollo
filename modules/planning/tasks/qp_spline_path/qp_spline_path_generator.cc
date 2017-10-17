@@ -39,9 +39,10 @@ namespace planning {
 using Vec2d = apollo::common::math::Vec2d;
 
 QpSplinePathGenerator::QpSplinePathGenerator(
-    const ReferenceLine& reference_line,
+    Spline1dGenerator* spline_generator, const ReferenceLine& reference_line,
     const QpSplinePathConfig& qp_spline_path_config)
-    : reference_line_(reference_line),
+    : spline_generator_(spline_generator),
+      reference_line_(reference_line),
       qp_spline_path_config_(qp_spline_path_config) {
   CHECK_GE(qp_spline_path_config_.regularization_weight(), 0.0)
       << "regularization_weight should NOT be negative.";
@@ -196,19 +197,16 @@ bool QpSplinePathGenerator::CalculateFrenetPoint(
 bool QpSplinePathGenerator::InitSpline(const double start_s,
                                        const double end_s) {
   uint32_t number_of_spline = static_cast<uint32_t>(
-      (end_s - start_s) / qp_spline_path_config_.max_spline_length());
+      (end_s - start_s) / qp_spline_path_config_.max_spline_length() + 1.0);
   number_of_spline = std::max(1u, number_of_spline);
   common::util::uniform_slice(start_s, end_s, number_of_spline, &knots_);
+
   // spawn a new spline generator
-  spline_generator_.reset(
-      new Spline1dGenerator(knots_, qp_spline_path_config_.spline_order()));
+  spline_generator_->Reset(knots_, qp_spline_path_config_.spline_order());
 
   // set evaluated_s_
-  double delta_s = qp_spline_path_config_.max_constraint_length();
-  uint32_t constraint_num =
-      std::max(3u, static_cast<uint32_t>((end_s - start_s) / delta_s));
-  delta_s = (end_s - start_s) / constraint_num;
-  common::util::uniform_slice(start_s + delta_s, end_s, constraint_num - 1,
+  uint32_t constraint_num = 3 * number_of_spline + 1;
+  common::util::uniform_slice(start_s, end_s, constraint_num - 1,
                               &evaluated_s_);
   return true;
 }

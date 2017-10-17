@@ -107,6 +107,8 @@ cc_library(
         ":spline_1d_kernel",
         "//modules/common/math/qp_solver",
         "//modules/common/math/qp_solver:active_set_qp_solver",
+        "//modules/common/time",
+        "//modules/planning/common:planning_gflags",
         "@eigen//:eigen",
     ],
 )
@@ -187,6 +189,8 @@ cc_library(
         "//modules/common/math:vec2d",
         "//modules/common/math/qp_solver",
         "//modules/common/math/qp_solver:active_set_qp_solver",
+        "//modules/common/time",
+        "//modules/planning/common:planning_gflags",
         "@eigen//:eigen",
     ],
 )

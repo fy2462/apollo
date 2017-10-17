@@ -135,6 +135,7 @@ class SimulationWorldService {
                       double header_time);
   void UpdateMainDecision(const apollo::planning::MainDecision &main_decision,
                           double update_timestamp_sec, Object *world_main_stop);
+  void UpdatePlanningData(const apollo::planning_internal::PlanningData &data);
 
   /**
    * @brief Check whether a particular adapter has been initialized correctly.
@@ -174,6 +175,8 @@ class SimulationWorldService {
   void RegisterMessageCallbacks();
 
   void ReadRoutingFromFile(const std::string &routing_response_file);
+
+  void UpdateDelays();
 
   // The underlying SimulationWorld object, owned by the
   // SimulationWorldService instance.

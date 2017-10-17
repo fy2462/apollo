@@ -143,8 +143,9 @@ bool SimulationWorldUpdater::ConstructRoutingRequest(
     AERROR << "Failed to prepare a routing request: start point not found";
     return false;
   }
+  routing_request->clear_waypoint();
   map_service_->ConstructLaneWayPoint(start["x"], start["y"],
-                                      routing_request->mutable_start());
+                                      routing_request->add_waypoint());
 
   // set way point(s) if any
   auto iter = json.find("waypoint");
@@ -160,18 +161,13 @@ bool SimulationWorldUpdater::ConstructRoutingRequest(
   }
 
   // set end point
-  RoutingRequest::LaneWaypoint *endLane = routing_request->mutable_end();
+  auto *end_point = routing_request->add_waypoint();
   if (json["sendDefaultRoute"]) {
     // Try to reload end point if it hasn't been loaded yet.
     if (!LoadDefaultEndPoint()) {
       return false;
     }
-
-    endLane->set_id(default_end_point_.id());
-    endLane->set_s(default_end_point_.s());
-    auto *pose = endLane->mutable_pose();
-    pose->set_x(default_end_point_.pose().x());
-    pose->set_y(default_end_point_.pose().y());
+    end_point->CopyFrom(default_end_point_);
   } else {
     if (json.find("end") == json.end()) {
       AERROR << "Failed to prepare a routing request: end point not found";
@@ -183,8 +179,11 @@ bool SimulationWorldUpdater::ConstructRoutingRequest(
       AERROR << "Failed to prepare a routing request: end point not found";
       return false;
     }
-    map_service_->ConstructLaneWayPoint(end["x"], end["y"], endLane);
+    map_service_->ConstructLaneWayPoint(end["x"], end["y"], end_point);
   }
+
+  AINFO << "Constructed RoutingRequest to be sent, waypoints: "
+        << routing_request->DebugString();
 
   return true;
 }
