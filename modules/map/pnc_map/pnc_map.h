@@ -42,7 +42,7 @@ class RouteSegments : public std::vector<LaneSegment> {
   }
   routing::ChangeLaneType change_lane_type() const { return change_lane_type_; }
 
-  /**
+  /** 投影一个点到路由段
    * Project a point to route segments.
    * @return false if error happended or projected outside of the lane segments.
    */
@@ -60,6 +60,7 @@ class PncMap {
 
   const hdmap::HDMap *hdmap() const;
 
+  // 这个什么时候调用？
   bool UpdateRoutingResponse(const routing::RoutingResponse &routing_response);
 
   const routing::RoutingResponse &routing_response() const;

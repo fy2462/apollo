@@ -514,6 +514,7 @@ double Path::GetSample(const std::vector<double>& samples,
 bool Path::IsOnPath(const Vec2d& point) const {
   double accumulate_s = 0.0;
   double lateral = 0.0;
+  // 取得投影 点, 起始点到该点距离，从起始点横向最小长度
   if (!GetProjection(point, &accumulate_s, &lateral)) {
     return false;
   }
