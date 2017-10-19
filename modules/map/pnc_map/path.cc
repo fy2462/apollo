@@ -432,19 +432,23 @@ bool Path::GetProjection(const Vec2d& point, double* accumulate_s,
     const auto& segment = segments_[i];
     const double distance = segment.DistanceTo(point);
     if (distance < *min_distance) {
+      // 起始点偏移量（x轴与起始点偏移量）
       const double proj = segment.ProjectOntoUnit(point);
       if (proj < 0.0 && i > 0) {
         continue;
       }
       if (proj > segment.length() && i + 1 < num_segments_) {
         const auto& next_segment = segments_[i + 1];
+        // 点在下一个段中
         if ((point - next_segment.start())
                 .InnerProd(next_segment.unit_direction()) >= 0.0) {
           continue;
         }
       }
+      // 获得最小距离
       *min_distance = distance;
       if (i + 1 >= num_segments_) {
+        // 遍历结束，当前起始距离加上偏移量=总偏移量。
         *accumulate_s = accumulated_s_[i] + proj;
       } else {
         *accumulate_s = accumulated_s_[i] + std::min(proj, segment.length());
@@ -452,6 +456,7 @@ bool Path::GetProjection(const Vec2d& point, double* accumulate_s,
       const double prod = segment.ProductOntoUnit(point);
       if ((i == 0 && proj < 0.0) ||
           (i + 1 == num_segments_ && proj > segment.length())) {
+        // 起始点偏移量（x轴与起始点偏移量）
         *lateral = prod;
       } else {
         *lateral = (prod > 0.0 ? distance : -distance);

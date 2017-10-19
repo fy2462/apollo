@@ -118,6 +118,7 @@ PncMap::PncMap(const HDMap *hdmap) : hdmap_(hdmap) {}
 
 const hdmap::HDMap *PncMap::hdmap() const { return hdmap_; }
 
+// 更新头，然后插入所有收集的routing中的lane
 bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
   if (routing_.has_header() && routing.has_header() &&
       routing_.header().sequence_num() == routing.header().sequence_num() &&
@@ -234,10 +235,12 @@ bool PncMap::GetRouteSegments(
   return true;
 }
 
+// PointENU 是点
 bool PncMap::GetNearestPointFromRouting(const common::PointENU &point,
                                         LaneWaypoint *waypoint) const {
   const double kMaxDistance = 20.0;  // meters.
   std::vector<LaneInfoConstPtr> lanes;
+  // 通过地图的2d点，找到hdmap内20m内的路
   const int status = hdmap_->GetLanes(point, kMaxDistance, &lanes);
   if (status < 0) {
     AERROR << "failed to get lane from point " << point.DebugString();
@@ -250,10 +253,13 @@ bool PncMap::GetNearestPointFromRouting(const common::PointENU &point,
   // get nearest_wayponints for current position
   double min_distance = std::numeric_limits<double>::infinity();
   for (const auto &lane : lanes) {
+    // 在routing_lane_ids_存在才继续处理
+    // lane->id().id() == string
     if (routing_lane_ids_.count(lane->id().id()) == 0) {
       continue;
     }
     double distance = 0.0;
+    // 取得2d点的路径上的距离
     common::PointENU map_point =
         lane->GetNearestPoint({point.x(), point.y()}, &distance);
     if (distance < min_distance) {
@@ -265,6 +271,7 @@ bool PncMap::GetNearestPointFromRouting(const common::PointENU &point,
                << map_point.DebugString();
         return false;
       }
+      // 取得道路点的起始点
       waypoint->lane = lane;
       waypoint->s = s;
     }
@@ -272,6 +279,7 @@ bool PncMap::GetNearestPointFromRouting(const common::PointENU &point,
   return true;
 }
 
+// 取得lane信息
 LaneInfoConstPtr PncMap::GetRouteSuccessor(LaneInfoConstPtr lane) const {
   if (lane->lane().successor_id_size() == 0) {
     return nullptr;
@@ -300,6 +308,7 @@ LaneInfoConstPtr PncMap::GetRoutePredecessor(LaneInfoConstPtr lane) const {
   return hdmap_->GetLaneById(preferred_id);
 }
 
+// 截断车道段start_s 为负，向前搜索，为正向后截断
 bool PncMap::TruncateLaneSegments(
     const RouteSegments &segments, double start_s, double end_s,
     RouteSegments *const truncated_segments) const {
