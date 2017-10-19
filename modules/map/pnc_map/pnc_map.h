@@ -34,6 +34,7 @@
 namespace apollo {
 namespace hdmap {
 
+  // 数组[车道段]
 class RouteSegments : public std::vector<LaneSegment> {
  public:
   RouteSegments() = default;
@@ -50,9 +51,11 @@ class RouteSegments : public std::vector<LaneSegment> {
                           double *l) const;
 
  private:
+  // 0前 1左 2右 
   routing::ChangeLaneType change_lane_type_ = routing::FORWARD;
 };
 
+// 地图入口类
 class PncMap {
  public:
   virtual ~PncMap() = default;
@@ -65,15 +68,17 @@ class PncMap {
 
   const routing::RoutingResponse &routing_response() const;
 
+  // 根据车道段创建路线（先获得路线段，routing获取）
   static bool CreatePathFromLaneSegments(const RouteSegments &segments,
                                          Path *const path);
-
+  // 根据点生成路由段
   bool GetRouteSegments(const common::PointENU &point,
                         const double backward_length,
                         const double forward_length,
                         std::vector<RouteSegments> *const route_segments) const;
 
  private:
+  // 为什么获得点段waypoint？
   bool GetNearestPointFromRouting(const common::PointENU &point,
                                   LaneWaypoint *waypoint) const;
 
