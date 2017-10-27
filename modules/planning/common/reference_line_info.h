@@ -44,6 +44,7 @@ class ReferenceLineInfo {
  public:
   explicit ReferenceLineInfo(const hdmap::PncMap* pnc_map,
                              const ReferenceLine& reference_line,
+                             const hdmap::RouteSegments& segments,
                              const common::TrajectoryPoint& init_adc_point);
 
   bool Init();
@@ -65,6 +66,7 @@ class ReferenceLineInfo {
   const DiscretizedTrajectory& trajectory() const;
 
   double Cost() const { return cost_; }
+  void AddCost(double cost) { cost_ += cost; }
 
   /**
    * @brief check if current reference line is started from another reference
@@ -91,6 +93,8 @@ class ReferenceLineInfo {
 
   const SLBoundary& AdcSlBoundary() const;
   std::string PathSpeedDebugString() const;
+
+  const hdmap::RouteSegments& Lanes() const;
 
   void ExportDecision(DecisionResult* decision_result) const;
 
@@ -120,6 +124,8 @@ class ReferenceLineInfo {
 
   planning_internal::Debug debug_;
   LatencyStats latency_stats_;
+
+  hdmap::RouteSegments lanes_;
 
   DISALLOW_COPY_AND_ASSIGN(ReferenceLineInfo);
 };

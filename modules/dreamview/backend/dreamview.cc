@@ -43,7 +43,7 @@ std::string Dreamview::Name() const {
 }
 
 Status Dreamview::Init() {
-  AdapterManager::Init(FLAGS_adapter_config_filename);
+  AdapterManager::Init(FLAGS_dreamview_adapter_config_filename);
   VehicleConfigHelper::Init();
 
   // Check the expected adapters are initialized.
@@ -85,6 +85,7 @@ Status Dreamview::Init() {
   sim_world_updater_.reset(
       new SimulationWorldUpdater(websocket_.get(), sim_control_.get(),
                                  map_service_.get(), FLAGS_routing_from_file));
+  hmi_.reset(new HMI(websocket_.get()));
 
   server_->addWebSocketHandler("/websocket", *websocket_);
   server_->addHandler("/image", *image_);
@@ -95,8 +96,9 @@ Status Dreamview::Init() {
 Status Dreamview::Start() {
   sim_world_updater_->Start();
   if (FLAGS_enable_sim_control) {
-    sim_control_->Start();
+    sim_control_->Init(true);
   }
+  hmi_->Start();
   return Status::OK();
 }
 

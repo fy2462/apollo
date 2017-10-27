@@ -26,19 +26,19 @@
 namespace apollo {
 namespace dreamview {
 
+using apollo::canbus::Chassis;
+using apollo::common::Point3D;
+using apollo::common::Quaternion;
+using apollo::common::TrajectoryPoint;
 using apollo::common::adapter::AdapterManager;
 using apollo::common::math::HeadingToQuaternion;
 using apollo::common::math::InverseQuaternionRotate;
-using apollo::common::math::QuaternionToHeading;
 using apollo::common::math::NormalizeAngle;
-using apollo::common::Point3D;
-using apollo::common::Quaternion;
+using apollo::common::math::QuaternionToHeading;
 using apollo::common::time::Clock;
-using apollo::common::TrajectoryPoint;
 using apollo::common::util::GetProtoFromFile;
-using apollo::routing::RoutingResponse;
 using apollo::localization::LocalizationEstimate;
-using apollo::canbus::Chassis;
+using apollo::routing::RoutingResponse;
 
 namespace {
 
@@ -58,9 +58,19 @@ SimControl::SimControl(const MapService* map_service)
       prev_point_index_(0),
       next_point_index_(0),
       received_planning_(false),
-      initial_start_(true),
-      enabled_(FLAGS_enable_sim_control) {
-  if (enabled_) {
+      enabled_(FLAGS_enable_sim_control) {}
+
+void SimControl::Init(bool set_start_point) {
+  // Setup planning and routing result data callback.
+  AdapterManager::AddPlanningCallback(&SimControl::OnPlanning, this);
+  AdapterManager::AddRoutingResponseCallback(&SimControl::OnRoutingResponse,
+                                             this);
+
+  // Start timer to publish localization and chassis messages.
+  sim_control_timer_ = AdapterManager::CreateTimer(
+      ros::Duration(kSimControlInterval), &SimControl::TimerCallback, this);
+
+  if (set_start_point) {
     apollo::common::PointENU start_point;
     if (!map_service_->GetStartPoint(&start_point)) {
       AWARN << "Failed to get a dummy start point from map!";
@@ -92,35 +102,28 @@ void SimControl::SetStartPoint(const double x, const double y) {
   prev_point_index_ = next_point_index_ = 0;
   received_planning_ = false;
 
-  if (enabled_) {
-    Start();
-  }
+  Start();
 }
 
 void SimControl::OnRoutingResponse(const RoutingResponse& routing) {
-  DCHECK_LE(2, routing.routing_request().waypoint_size());
+  CHECK_LE(2, routing.routing_request().waypoint_size());
   const auto& start_pose = routing.routing_request().waypoint(0).pose();
-  SetStartPoint(start_pose.x(), start_pose.y());
+
+  // If this is from a planning re-routing request, don't reset car's location.
+  if (routing.routing_request().header().module_name() != "planning") {
+    SetStartPoint(start_pose.x(), start_pose.y());
+  }
 }
 
 void SimControl::Start() {
-  if (initial_start_) {
-    // Setup planning and routing result data callback.
-    AdapterManager::AddPlanningCallback(&SimControl::OnPlanning, this);
-    AdapterManager::AddRoutingResponseCallback(&SimControl::OnRoutingResponse,
-                                               this);
-
-    // Start timer to publish localization and chassis messages.
-    sim_control_timer_ = AdapterManager::CreateTimer(
-        ros::Duration(kSimControlInterval), &SimControl::TimerCallback, this);
-
-    initial_start_ = false;
-  } else {
+  if (enabled_) {
     sim_control_timer_.start();
   }
 }
 
-void SimControl::Stop() { sim_control_timer_.stop(); }
+void SimControl::Stop() {
+  sim_control_timer_.stop();
+}
 
 void SimControl::OnPlanning(const apollo::planning::ADCTrajectory& trajectory) {
   // Reset current trajectory and the indices upon receiving a new trajectory.
@@ -147,6 +150,10 @@ bool SimControl::NextPointWithinRange() {
 }
 
 void SimControl::TimerCallback(const ros::TimerEvent& event) {
+  RunOnce();
+}
+
+void SimControl::RunOnce() {
   // Result of the interpolation.
   double lambda = 0;
   auto current_time = Clock::NowInSecond();
