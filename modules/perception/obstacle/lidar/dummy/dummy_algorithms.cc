@@ -66,6 +66,7 @@ void DummyObjectBuilder::BuildObject(const ObjectBuilderOptions &options,
   if (cloud->points.size() < 4u) {
     return;
   }
+  // 顺时针obj四周边缘点
   obj->polygon.points.resize(4);
   obj->polygon.points[0].x = static_cast<double>(min_pt[0]);
   obj->polygon.points[0].y = static_cast<double>(min_pt[1]);
@@ -94,6 +95,7 @@ bool DummyObjectBuilder::Build(const ObjectBuilderOptions &options,
   for (size_t i = 0; i < objects->size(); ++i) {
     if ((*objects)[i]) {
       (*objects)[i]->id = static_cast<int>(i);
+      // 构造obj四周边缘点
       BuildObject(options, (*objects)[i]);
     }
   }
@@ -120,22 +122,28 @@ bool DummyTracker::Track(const vector<ObjectPtr> &objects, double timestamp,
     ObjectPtr obj(new Object());
     obj->clone(*objects[i]);
     const Eigen::Vector3d &dir = obj->direction;
+    // 获取物体相对车位置朝向
     obj->direction =
         (pose * Eigen::Vector4d(dir[0], dir[1], dir[2], 0)).head(3);
     const Eigen::Vector3d &center = obj->center;
+    // 获取物体相对车位置中心点
     obj->center =
         (pose * Eigen::Vector4d(center[0], center[1], center[2], 1)).head(3);
     // obj->anchor_point = obj->center;
-
+    // 转换锚点（讲点云数据转换到地图位置）
     TransformPointCloud<Point>(pose, obj->cloud);
     TransformPointCloud<PointD>(pose, obj->polygon.makeShared());
+    // （锚点转换后）不是x轴方向
     if (fabs(obj->direction[0]) < DBL_MIN) {
+      // y轴方向，角度顺时针90
       if (obj->direction[1] > 0) {
         obj->theta = M_PI / 2;
       } else {
+        // y轴逆时针90
         obj->theta = -M_PI / 2;
       }
     } else {
+      // 获得反正切值，获取旋转角度
       obj->theta = atan(obj->direction[1] / obj->direction[0]);
     }
     (*tracked_objects)[i] = obj;

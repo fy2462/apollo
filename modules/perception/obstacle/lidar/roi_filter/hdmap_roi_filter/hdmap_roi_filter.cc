@@ -25,7 +25,7 @@ bool HdmapROIFilter::Filter(const pcl_util::PointCloudPtr& cloud,
   }
 
   Eigen::Affine3d temp_trans(*(roi_filter_options.velodyne_trans));
-
+  // 生成边缘+轨迹数组
   std::vector<PolygonDType> polygons;
   MergeHdmapStructToPolygons(roi_filter_options.hdmap, &polygons);
 
@@ -140,6 +140,7 @@ void HdmapROIFilter::MergeHdmapStructToPolygons(
     std::vector<PolygonDType>* polygons) {
 
   std::vector<PolygonDType> road_polygons;
+  // 转换成PolygonDType类型数组
   MergeRoadBoundariesToPolygons(hdmap_struct_ptr->road_boundary,
                                 &road_polygons);
 

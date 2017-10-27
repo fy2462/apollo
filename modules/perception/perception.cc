@@ -54,7 +54,9 @@ void Perception::OnPointCloud(const sensor_msgs::PointCloud2& message) {
 
     /// public obstacle message
     PerceptionObstacles obstacles;
+    // 根据处理出的obj设置obstacles
     if (lidar_process_->GeneratePbMsg(&obstacles)) {
+      // return
       AdapterManager::PublishPerceptionObstacles(obstacles);
     }
   }

@@ -103,7 +103,7 @@ bool LidarProcess::Process(const sensor_msgs::PointCloud2& message) {
   error_code_ = common::OK;
   return true;
 }
-
+// 时间戳、点云指针、坐标图
 bool LidarProcess::Process(const double timestamp, PointCloudPtr point_cloud,
                            std::shared_ptr<Matrix4d> velodyne_trans) {
   PERF_BLOCK_START();
@@ -125,6 +125,7 @@ bool LidarProcess::Process(const double timestamp, PointCloudPtr point_cloud,
     ROIFilterOptions roi_filter_options;
     roi_filter_options.velodyne_trans = velodyne_trans;
     roi_filter_options.hdmap = hdmap;
+    // 过滤出ROI PointIndicesPtr指针
     if (roi_filter_->Filter(point_cloud, roi_filter_options,
                             roi_indices.get())) {
       pcl::copyPointCloud(*point_cloud, *roi_indices, *roi_cloud);
@@ -150,6 +151,7 @@ bool LidarProcess::Process(const double timestamp, PointCloudPtr point_cloud,
 
     std::iota(non_ground_indices.indices.begin(),
               non_ground_indices.indices.end(), 0);
+    // 过滤后的点云集、处理后点云集(out)、原始点云数据、obj list
     if (!segmentor_->Segment(roi_cloud, non_ground_indices,
                              segmentation_options, &objects)) {
       AERROR << "failed to call segmention.";
@@ -160,7 +162,7 @@ bool LidarProcess::Process(const double timestamp, PointCloudPtr point_cloud,
   ADEBUG << "call segmentation succ. The num of objects is: " << objects.size();
   PERF_BLOCK_END("lidar_segmentation");
 
-  /// call object builder
+  /// call object builder 勾画出obj的边缘点
   if (object_builder_ != nullptr) {
     ObjectBuilderOptions object_builder_options;
     if (!object_builder_->Build(object_builder_options, &objects)) {
@@ -184,7 +186,7 @@ bool LidarProcess::Process(const double timestamp, PointCloudPtr point_cloud,
       return false;
     }
   }
-
+  // 过滤出obj位置、边缘、方向
   PERF_BLOCK_END("lidar_tracker");
   ADEBUG << "lidar process succ, there are " << objects_.size()
          << " tracked objects.";
@@ -372,6 +374,7 @@ bool LidarProcess::GeneratePbMsg(PerceptionObstacles* obstacles) {
       AERROR << "Failed gen PerceptionObstacle. Object:" << obj->ToString();
       return false;
     }
+    // 精确到S
     obstacle->set_timestamp(obstacle->timestamp() * 1000);
   }
 

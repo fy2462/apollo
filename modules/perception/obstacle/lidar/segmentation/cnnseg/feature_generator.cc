@@ -130,6 +130,7 @@ void FeatureGenerator<Dtype>::Generate(
       map_idx_[i] = -1;
       continue;
     }
+    // 取得多边形位置对应的id
     map_idx_[i] = pos_y * width_ + pos_x;
 
     int idx = map_idx_[i];
@@ -137,6 +138,7 @@ void FeatureGenerator<Dtype>::Generate(
     float pi = points[i].intensity / 255.0;
     if (max_height_data_[idx] < pz) {
       max_height_data_[idx] = pz;
+      // 强度数据
       top_intensity_data_[idx] = pi;
     }
     mean_height_data_[idx] += static_cast<Dtype>(pz);
@@ -144,6 +146,7 @@ void FeatureGenerator<Dtype>::Generate(
     count_data_[idx] += Dtype(1);
   }
 
+  // 获取平均高度值、平均强度值
   for (int i = 0; i < siz; ++i) {
     if (count_data_[i] < EPS) {
       max_height_data_[i] = Dtype(0);

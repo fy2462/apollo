@@ -150,6 +150,7 @@ bool CNNSegmentation::Segment(const pcl_util::PointCloudPtr& pc_ptr,
   PERF_BLOCK_START();
 
   // generate raw features
+  // 生成多边形数据形态（平均高度、强度），并放入mean_height_data_中
   if (use_full_cloud_) {
     feature_generator_->Generate(options.origin_cloud);
   } else {
@@ -161,6 +162,7 @@ bool CNNSegmentation::Segment(const pcl_util::PointCloudPtr& pc_ptr,
 #ifdef USE_CAFFE_GPU
   caffe::Caffe::set_mode(caffe::Caffe::GPU);
 #endif
+  // 前向传播
   caffe_net_->Forward();
   PERF_BLOCK_END("[CNNSeg] CNN forward");
 

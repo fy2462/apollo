@@ -86,7 +86,9 @@ class BaseObjectBuilder {
   virtual void SetDefaultValue(pcl_util::PointCloudPtr cloud, ObjectPtr obj,
                                Eigen::Vector4f* min_pt,
                                Eigen::Vector4f* max_pt) {
+    // 获取该obj x y z 最大值，获取obj边界
     GetCloudMinMax3D<pcl_util::Point>(cloud, min_pt, max_pt);
+    // 中心点
     Eigen::Vector3f center(((*min_pt)[0] + (*max_pt)[0]) / 2,
                            ((*min_pt)[1] + (*max_pt)[1]) / 2,
                            ((*min_pt)[2] + (*max_pt)[2]) / 2);
@@ -100,16 +102,18 @@ class BaseObjectBuilder {
       }
     }
 
-    // length
+    // length x 是长度
     obj->length = (*max_pt)[0] - (*min_pt)[0];
-    // width
+    // width y是物体宽度
     obj->width = (*max_pt)[1] - (*min_pt)[1];
     if (obj->length - obj->width < 0) {
       float tmp = obj->length;
       obj->length = obj->width;
       obj->width = tmp;
+      // y轴方向
       obj->direction = Eigen::Vector3d(0.0, 1.0, 0.0);
     } else {
+      // x轴方向
       obj->direction = Eigen::Vector3d(1.0, 0.0, 0.0);
     }
     // height

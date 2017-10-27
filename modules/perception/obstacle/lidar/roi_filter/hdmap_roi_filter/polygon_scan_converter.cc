@@ -61,6 +61,7 @@ void PolygonScanConverter::ConvertScans(
 
 
   for (size_t i = 1; i < scans_size_; ++i) {
+    // 找到 i 列 的排序 
     UpdateActiveEdgeTable(i, &(scans_intervals->at(i)) );
   }
 }
@@ -123,11 +124,11 @@ void PolygonScanConverter::BuildEdgeTable() {
   for (size_t i = 0; i < edges.size(); ++i) {
     int x_id = edges[i].first;
     const Edge &edge = edges[i].second;
-
+    // 在外面
     if (x_id >=static_cast<int>(scans_size_)) {
       continue;
     }
-
+    // 在里面
     if (x_id >= 0) {
       edge_table_[x_id].push_back(edge);
     } else {
