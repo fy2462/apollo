@@ -14,17 +14,16 @@
  * limitations under the License.
  *****************************************************************************/
 
-// @todo: complete this using gmock & gtest, capture logging contents and do
-// checks.
+#include "modules/monitor/hwmonitor/hw/socketcan/socketcan_test.h"
 
-#include "modules/monitor/common/log.h"
+namespace apollo {
+namespace monitor {
+namespace hw {
 
-int main() {
-  apollo::platform::log::LogModule m1 = {
-      "test", 5, 10, apollo::platform::log::platform_log_printf};
-  m1.set_log_lvl(7);
-
-  PLATFORM_LOG(&m1, 3, "test");
-
+int socket_do_test(int id) {
   return 0;
 }
+
+}  // namespace hw
+}  // namespace monitor
+}  // namespace apollo
