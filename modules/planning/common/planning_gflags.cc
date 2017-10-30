@@ -130,7 +130,7 @@ DEFINE_double(nudge_distance_obstacle, 0.3,
 DEFINE_double(follow_min_distance, 10,
               "min follow distance for vehicles/bicycles/moving objects");
 DEFINE_double(
-    follow_time_buffer, 4.0,
+    follow_time_buffer, 2.0,
     "follow time buffer (in second) to calculate the following distance.");
 
 DEFINE_string(destination_obstacle_id, "DEST",
@@ -177,6 +177,10 @@ DEFINE_double(crosswalk_strick_l_distance, 4.0,
               "strick stop rule within this l_distance");
 DEFINE_double(crosswalk_loose_l_distance, 5.0,
               "loose stop rule beyond this l_distance");
+
+DEFINE_double(
+    turn_signal_distance, 80,
+    "meters. If there is a turn within this distance, use turn signal");
 
 // planning config file
 DEFINE_string(planning_config_file,
