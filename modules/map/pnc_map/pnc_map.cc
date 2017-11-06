@@ -37,6 +37,11 @@
 #include "modules/map/pnc_map/path.h"
 #include "modules/routing/common/routing_gflags.h"
 
+DEFINE_bool(reckless_change_lane, false, "always allow change lane");
+DEFINE_double(max_distance_to_lane_center, 0.2,
+              "The max distance to lance center that we believe lane change is "
+              "finished.");
+
 namespace apollo {
 namespace hdmap {
 
@@ -98,6 +103,10 @@ void RemoveDuplicates(std::vector<MapPathPoint> *points) {
 
 }  // namespace
 
+const std::string &RouteSegments::Id() const { return id_; }
+
+void RouteSegments::SetId(const std::string &id) { id_ = id; }
+
 void RouteSegments::SetCanExit(bool can_exit) { can_exit_ = can_exit; }
 
 bool RouteSegments::CanExit() const { return can_exit_; }
@@ -128,13 +137,12 @@ bool RouteSegments::GetProjection(const common::PointENU &point_enu, double *s,
     double lane_s = 0.0;
     double lane_l = 0.0;
     if (!iter->lane->GetProjection(point, &lane_s, &lane_l)) {
-      ADEBUG << "Failed to get projection from point " << point.DebugString()
+      AERROR << "Failed to get projection from point " << point.DebugString()
              << " on lane " << iter->lane->id().id();
       return false;
     }
     if (lane_s < iter->start_s - kSegmentationEpsilon ||
         lane_s > iter->end_s + kSegmentationEpsilon) {
-      ADEBUG << "point " << point.DebugString() << " not in range";
       continue;
     }
     if (std::fabs(lane_l) < std::fabs(*l)) {
@@ -148,6 +156,14 @@ bool RouteSegments::GetProjection(const common::PointENU &point_enu, double *s,
     }
   }
   return has_projection;
+}
+
+void RouteSegments::SetPreviousAction(routing::ChangeLaneType action) {
+  previous_action_ = action;
+}
+
+routing::ChangeLaneType RouteSegments::PreviousAction() const {
+  return previous_action_;
 }
 
 void RouteSegments::SetNextAction(routing::ChangeLaneType action) {
@@ -249,7 +265,8 @@ PncMap::PncMap(const HDMap *hdmap) : hdmap_(hdmap) {}
 
 const hdmap::HDMap *PncMap::hdmap() const { return hdmap_; }
 
-bool PncMap::UpdatePosition(const common::PointENU &point) {
+bool PncMap::UpdateVehicleState(const common::VehicleState &state) {
+  auto point = common::util::MakePointENU(state.x(), state.y(), state.z());
   if (!GetNearestPointFromRouting(point, &current_waypoint_)) {
     AERROR << "Failed to get waypoint from routing";
     return false;
@@ -264,9 +281,18 @@ bool PncMap::UpdatePosition(const common::PointENU &point) {
   if (route_index_.size() != 3 || route_index_[0] != current_route_index[0] ||
       route_index_[1] != current_route_index[1]) {  //  different passage
     passage_start_point_ = point;
+    min_l_to_lane_center_ = std::numeric_limits<double>::max();
   }
   current_point_ = point;
   route_index_ = current_route_index;
+  double s = 0.0;
+  double l = 0.0;
+  if (!current_waypoint_.lane->GetProjection({point.x(), point.y()}, &s, &l)) {
+    AERROR << "Failed to project poin " << point.ShortDebugString()
+           << " onto lane " << current_waypoint_.lane->id().id();
+    return false;
+  }
+  min_l_to_lane_center_ = std::min(min_l_to_lane_center_, std::fabs(l));
   return true;
 }
 
@@ -276,8 +302,8 @@ bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
       routing_.header().sequence_num() == routing.header().sequence_num() &&
       (std::fabs(routing_.header().timestamp_sec() -
                  routing.header().timestamp_sec()) < 0.1)) {
-    ADEBUG << "Same prouting, skip update routing";
-    return false;
+    ADEBUG << "Same routing, skip update routing";
+    return true;
   }
   if (!ValidateRouting(routing)) {
     AERROR << "Invalid routing";
@@ -340,7 +366,8 @@ bool PncMap::PassageToSegments(routing::Passage passage,
       AERROR << "Failed to find lane : " << lane.id();
       return false;
     }
-    segments->emplace_back(lane_ptr, lane.start_s(), lane.end_s());
+    segments->emplace_back(lane_ptr, std::max(0.0, lane.start_s()),
+                           std::min(lane_ptr->total_length(), lane.end_s()));
   }
   return !segments->empty();
 }
@@ -404,14 +431,21 @@ std::vector<int> PncMap::GetNeighborPassages(const routing::RoadSegment &road,
 bool PncMap::GetRouteSegments(
     const double backward_length, const double forward_length,
     std::vector<RouteSegments> *const route_segments) const {
+  // vehicle has to be this close to lane center before considering change lane
   if (!current_waypoint_.lane || route_index_.size() != 3 ||
       route_index_[0] < 0) {
-    AERROR << "Invalid position, use UpdatePosition() function first";
+    AERROR << "Invalid position, use UpdateVehicleState() function first";
     return false;
   }
   const int road_index = route_index_[0];
   const int passage_index = route_index_[1];
   const auto &road = routing_.road(road_index);
+  const double dist_on_passage =
+      common::util::DistanceXY(current_point_, passage_start_point_);
+  const bool allow_change_lane =
+      FLAGS_reckless_change_lane ||
+      ((min_l_to_lane_center_ < FLAGS_max_distance_to_lane_center) &&
+       (dist_on_passage > FLAGS_min_length_for_lane_change));
   // raw filter to find all neighboring passages
   auto drive_passages = GetNeighborPassages(road, passage_index);
   for (const int index : drive_passages) {
@@ -431,18 +465,16 @@ bool PncMap::GetRouteSegments(
     LaneWaypoint segment_waypoint;
     if (!segments.GetProjection(nearest_point, &s, &l, &segment_waypoint)) {
       ADEBUG << "Failed to get projection from point: "
-             << nearest_point.DebugString();
+             << nearest_point.ShortDebugString();
       continue;
     }
-    if (index != passage_index) {  // the change lane case
+    if (index != passage_index) {
+      if (!allow_change_lane) {
+        continue;
+      }
       if (!segments.CanDriveFrom(current_waypoint_)) {
         ADEBUG << "You cannot drive from current waypoint to passage: "
                << index;
-        continue;
-      }
-      const double dist_on_passage =
-          common::util::DistanceXY(current_point_, passage_start_point_);
-      if (dist_on_passage < FLAGS_min_length_for_lane_change) {
         continue;
       }
     }
@@ -455,8 +487,16 @@ bool PncMap::GetRouteSegments(
     }
     route_segments->back().SetCanExit(passage.can_exit());
     route_segments->back().SetNextAction(passage.change_lane_type());
+    std::string route_segment_id =
+        std::to_string(road_index) + "_" + std::to_string(index);
+    route_segments->back().SetId(route_segment_id);
     if (index == passage_index) {
       route_segments->back().SetIsOnSegment(true);
+      route_segments->back().SetPreviousAction(routing::FORWARD);
+    } else if (l > 0) {
+      route_segments->back().SetPreviousAction(routing::RIGHT);
+    } else {
+      route_segments->back().SetPreviousAction(routing::LEFT);
     }
   }
   return !route_segments->empty();

@@ -49,7 +49,7 @@ class QpSplinePathGenerator {
 
   void SetDebugLogger(apollo::planning_internal::Debug* debug);
 
-  bool Generate(const std::vector<const PathObstacle*>& obstacles,
+  bool Generate(const std::vector<const PathObstacle*>& path_obstacles,
                 const SpeedData& speed_data,
                 const common::TrajectoryPoint& init_point,
                 PathData* const path_data);

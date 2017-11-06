@@ -35,18 +35,17 @@ class HMI {
  public:
   explicit HMI(WebSocketHandler *websocket);
 
-  void Start();
-
  private:
-  // Callback of new HMIStatus message.
-  void OnHMIStatus(const HMIStatus &hmi_status);
   // Broadcast HMIStatus to all clients.
   void BroadcastHMIStatus() const;
 
-  static int ExecuteComponentCommand(
-      const google::protobuf::Map<std::string, Component> &components,
-      const std::string &component_name,
-      const std::string &command_name);
+  void RegisterMessageHandlers();
+
+  // Run a supported command of module, return the ret code.
+  int RunModuleCommand(const std::string &module_name,
+                       const std::string &command_name);
+  // Run a supported command of all modules, return the count of failed ones.
+  int RunCommandOnAllModules(const std::string &command_name);
 
   static void ChangeDrivingModeTo(const std::string &new_mode);
   void ChangeMapTo(const std::string &new_map);
@@ -58,8 +57,7 @@ class HMI {
   // No ownership.
   WebSocketHandler *websocket_;
 
-  FRIEND_TEST(HMITest, UpdateHMIStatus);
-  FRIEND_TEST(HMITest, ExecuteComponentCommand);
+  FRIEND_TEST(HMITest, RunModuleCommand);
 };
 
 }  // namespace dreamview

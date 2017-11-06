@@ -49,13 +49,32 @@ DEFINE_double(look_forward_time_sec, 8,
               "look forward time times adc speed to calculate this distance "
               "when creating reference line from routing");
 
+DEFINE_double(prepare_rerouting_time, 2.0,
+              "If there are this amount of seconds left to finish driving on "
+              "current route, and there is no routing, do rerouting");
+
+DEFINE_double(rerouting_cooldown_time, 0.6,
+              "Wait for at least this amount of seconds before send another "
+              "rerouting request");
+
 DEFINE_bool(enable_smooth_reference_line, true,
             "enable smooth the map reference line");
 
 DEFINE_bool(enable_spiral_reference_line, false,
             "enable new spiral based reference line");
+DEFINE_double(spiral_smoother_max_deviation, 0.1,
+              "The max deviation of spiral reference line smoother.");
+DEFINE_int32(spiral_smoother_num_iteration, 1000,
+             "The iteration num of spiral reference line smoother.");
+DEFINE_double(spiral_smoother_piecewise_length, 10.0,
+              "The piecewise length of spiral smoother.");
+DEFINE_double(spiral_reference_line_resolution, 0.02,
+              "The output resolution for reference line.");
+DEFINE_bool(prioritize_change_lane, false,
+            "change lane strategy has higher priority, always use a valid "
+            "change lane path if such path exists");
 
-DEFINE_int32(max_history_frame_num, 5, "The maximum history frame number");
+DEFINE_int32(max_history_frame_num, 1, "The maximum history frame number");
 
 DEFINE_double(max_collision_distance, 0.1,
               "considered as collision if distance (meters) is smaller than or "
@@ -80,7 +99,7 @@ DEFINE_double(planning_upper_speed_limit, 31.3,
 DEFINE_double(trajectory_time_length, 8.0, "Trajectory time length");
 DEFINE_double(trajectory_time_resolution, 0.1,
               "Trajectory time resolution in planning");
-DEFINE_double(output_trajectory_time_resolution, 0.01,
+DEFINE_double(output_trajectory_time_resolution, 0.1,
               "Trajectory time resolution when publish for EM planner");
 
 DEFINE_bool(enable_trajectory_check, false,
@@ -104,6 +123,8 @@ DEFINE_double(longitudinal_jerk_lower_bound, -4.0,
 DEFINE_double(longitudinal_jerk_upper_bound, 4.0,
               "The upper bound of longitudinal jerk.");
 
+DEFINE_double(dl_bound, 0.10,
+              "The bound for derivative l in s-l coordinate system.");
 DEFINE_double(kappa_bound, 0.20, "The bound for vehicle curvature");
 DEFINE_double(dkappa_bound, 0.02,
               "The bound for vehicle curvature change rate");
@@ -125,6 +146,9 @@ DEFINE_double(stop_distance_obstacle, 10.0,
               "stop distance from in-lane obstacle (meters)");
 DEFINE_double(stop_distance_destination, 3.0,
               "stop distance from destination line");
+DEFINE_double(destination_check_distance, 5.0,
+              "if the distance between destination and ADC is less than this,"
+              " it is considered to reach destination");
 DEFINE_double(nudge_distance_obstacle, 0.3,
               "minimum distance to nudge a obstacle (meters)");
 DEFINE_double(follow_min_distance, 10,

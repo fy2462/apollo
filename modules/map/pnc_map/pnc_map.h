@@ -21,6 +21,7 @@
 #ifndef MODULES_MAP_PNC_MAP_PNC_MAP_H_
 #define MODULES_MAP_PNC_MAP_PNC_MAP_H_
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -29,6 +30,7 @@
 
 #include "gflags/gflags.h"
 
+#include "modules/common/proto/vehicle_state.pb.h"
 #include "modules/routing/proto/routing.pb.h"
 
 #include "modules/map/hdmap/hdmap.h"
@@ -57,9 +59,9 @@ class RouteSegments : public std::vector<LaneSegment> {
 
   /**
    * Get the next change lane action need to take by the vehicle, if the vehicle
-   * is on this RouteSegments. For a vehicle on this RouteSegment,
-   * If the vehicle does not need to change lane, then change_lane_type =
-   * routing::FORWARD
+   * is on this RouteSegments.
+   * If the vehicle does not need to change lane, then change_lane_type =*
+   * routing::FORWARD;
    * If the vehicle need to change to left lane according to routing, then
    * change_lane_type_ =  routing::LEFT;
    * If the vehicle need to change to right lane according to routing, then
@@ -67,6 +69,20 @@ class RouteSegments : public std::vector<LaneSegment> {
    */
   routing::ChangeLaneType NextAction() const;
   void SetNextAction(routing::ChangeLaneType action);
+
+  /**
+   * Get the previous change lane action need to take by the vehicle to reach
+   * current segment, if the vehicle is not on this RouteSegments.
+   * this RouteSegment,
+   * If the vehicle is already on this segment, or does not need to change lane
+   * to reach this segment, then change_lane_type = routing::FORWARD;
+   * If the vehicle need to change to left to reach this segment, then
+   * change_lane_type_ =  routing::LEFT;
+   * If the vehicle need to change to right to reach this segment, then
+   * change_lane_type_ = routing::RIGHT;
+   */
+  routing::ChangeLaneType PreviousAction() const;
+  void SetPreviousAction(routing::ChangeLaneType action);
 
   /**
    * Wether the passage region that generate this route segment can lead to
@@ -110,6 +126,9 @@ class RouteSegments : public std::vector<LaneSegment> {
   bool IsOnSegment() const;
   void SetIsOnSegment(bool on_segment);
 
+  void SetId(const std::string &id);
+  const std::string &Id() const;
+
   /**
    * Get the last waypoint from the lane segments.
    */
@@ -135,7 +154,10 @@ class RouteSegments : public std::vector<LaneSegment> {
 
   routing::ChangeLaneType next_action_ = routing::FORWARD;
   // 0前 1左 2右 
-  routing::ChangeLaneType change_lane_type_ = routing::FORWARD;
+
+  routing::ChangeLaneType previous_action_ = routing::FORWARD;
+
+  std::string id_;
 };
 
 // 地图入口类
@@ -148,7 +170,7 @@ class PncMap {
 
   // 这个什么时候调用？
   bool UpdateRoutingResponse(const routing::RoutingResponse &routing_response);
-  bool UpdatePosition(const common::PointENU &point);
+  bool UpdateVehicleState(const common::VehicleState &vehicle_state);
 
   const routing::RoutingResponse &routing_response() const;
 
@@ -213,6 +235,7 @@ class PncMap {
   common::PointENU current_point_;
   std::vector<int> route_index_;
   common::PointENU passage_start_point_;
+  double min_l_to_lane_center_ = std::numeric_limits<double>::max();
   const hdmap::HDMap *hdmap_ = nullptr;
 };
 

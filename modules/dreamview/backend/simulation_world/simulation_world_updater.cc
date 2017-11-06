@@ -39,8 +39,8 @@ SimulationWorldUpdater::SimulationWorldUpdater(WebSocketHandler *websocket,
       map_service_(map_service),
       websocket_(websocket),
       sim_control_(sim_control) {
-  // Initialize default end point
-  LoadDefaultEndPoint();
+  // Initialize points of interest
+  LoadPOI();
 
   websocket_->RegisterMessageHandler(
       "RetrieveMapData",
@@ -122,10 +122,17 @@ SimulationWorldUpdater::SimulationWorldUpdater(WebSocketHandler *websocket,
         Json response;
         response["type"] = "DefaultEndPoint";
 
-        if (LoadDefaultEndPoint()) {
-          response["end_x"] = default_end_point_.pose().x();
-          response["end_y"] = default_end_point_.pose().y();
+        Json poi_list = Json::array();
+        if (LoadPOI()) {
+          for (const auto &landmark : poi_.landmark()) {
+            Json place;
+            place["name"] = landmark.name();
+            place["x"] = landmark.waypoint().pose().x();
+            place["y"] = landmark.waypoint().pose().y();
+            poi_list.push_back(place);
+          }
         }
+        response["poi"] = poi_list;
         websocket_->SendData(conn, response.dump());
       });
 
@@ -148,8 +155,7 @@ SimulationWorldUpdater::SimulationWorldUpdater(WebSocketHandler *websocket,
 bool SimulationWorldUpdater::ConstructRoutingRequest(
     const Json &json, RoutingRequest *routing_request) {
   // Input validations
-  if (json.find("start") == json.end() ||
-      json.find("sendDefaultRoute") == json.end()) {
+  if (json.find("start") == json.end()) {
     AERROR << "Cannot prepare a routing request: input validation failed.";
     return false;
   }
@@ -170,6 +176,11 @@ bool SimulationWorldUpdater::ConstructRoutingRequest(
     auto *waypoint = routing_request->mutable_waypoint();
     for (size_t i = 0; i < iter->size(); ++i) {
       auto &point = (*iter)[i];
+      if (point.find("x") == point.end() || point.find("y") == point.end()) {
+        AERROR << "Failed to prepare a routing request: waypoint not found";
+        return false;
+      }
+
       if (!map_service_->ConstructLaneWayPoint(point["x"], point["y"],
                                                waypoint->Add())) {
         waypoint->RemoveLast();
@@ -179,27 +190,19 @@ bool SimulationWorldUpdater::ConstructRoutingRequest(
 
   // set end point
   auto *end_point = routing_request->add_waypoint();
-  if (json["sendDefaultRoute"]) {
-    // Try to reload end point if it hasn't been loaded yet.
-    if (!LoadDefaultEndPoint()) {
-      return false;
-    }
-    end_point->CopyFrom(default_end_point_);
-  } else {
-    if (json.find("end") == json.end()) {
-      AERROR << "Failed to prepare a routing request: end point not found";
-      return false;
-    }
-
-    auto end = json["end"];
-    if (end.find("x") == end.end() || end.find("y") == end.end()) {
-      AERROR << "Failed to prepare a routing request: end point not found";
-      return false;
-    }
-    map_service_->ConstructLaneWayPoint(end["x"], end["y"], end_point);
+  if (json.find("end") == json.end()) {
+    AERROR << "Failed to prepare a routing request: end point not found";
+    return false;
   }
 
-  AINFO << "Constructed RoutingRequest to be sent, waypoints: "
+  auto end = json["end"];
+  if (end.find("x") == end.end() || end.find("y") == end.end()) {
+    AERROR << "Failed to prepare a routing request: end point not found";
+    return false;
+  }
+  map_service_->ConstructLaneWayPoint(end["x"], end["y"], end_point);
+
+  AINFO << "Constructed RoutingRequest to be sent:\n"
         << routing_request->DebugString();
 
   return true;
@@ -218,17 +221,17 @@ void SimulationWorldUpdater::OnTimer(const ros::TimerEvent &event) {
     boost::unique_lock<boost::shared_mutex> writer_lock(mutex_);
 
     simulation_world_json_ =
-        sim_world_service_.GetUpdateAsJson(FLAGS_map_radius).dump();
+        sim_world_service_.GetUpdateAsJson(FLAGS_sim_map_radius).dump();
   }
 }
 
-bool SimulationWorldUpdater::LoadDefaultEndPoint() {
-  if (default_end_point_.has_id() ||
-      GetProtoFromASCIIFile(EndWayPointFile(), &default_end_point_)) {
+bool SimulationWorldUpdater::LoadPOI() {
+  if (poi_.landmark_size() > 0 ||
+      GetProtoFromASCIIFile(EndWayPointFile(), &poi_)) {
     return true;
   }
 
-  AWARN << "Failed to load default end point from " << EndWayPointFile();
+  AWARN << "Failed to load default list of POI from " << EndWayPointFile();
   return false;
 }
 

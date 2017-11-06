@@ -44,19 +44,42 @@ ReferenceLineProvider::~ReferenceLineProvider() {
 
 void ReferenceLineProvider::Init(
     const hdmap::HDMap *hdmap_,
-    const ReferenceLineSmootherConfig &smoother_config) {
+    const QpSplineReferenceLineSmootherConfig &smoother_config) {
   pnc_map_.reset(new hdmap::PncMap(hdmap_));
   smoother_config_ = smoother_config;
   std::vector<double> init_t_knots;
   spline_solver_.reset(new Spline2dSolver(init_t_knots, 1));
+  if (FLAGS_enable_spiral_reference_line) {
+    smoother_.reset(
+        new SpiralReferenceLineSmoother(FLAGS_spiral_smoother_max_deviation));
+  } else {
+    smoother_.reset(new QpSplineReferenceLineSmoother(smoother_config_,
+                                                      spline_solver_.get()));
+  }
   is_initialized_ = true;
 }
 
-void ReferenceLineProvider::UpdateRoutingResponse(
+bool ReferenceLineProvider::UpdateRoutingResponse(
     const routing::RoutingResponse &routing) {
   std::lock_guard<std::mutex> lock(pnc_map_mutex_);
-  pnc_map_->UpdateRoutingResponse(routing);
+  if (!pnc_map_->UpdateRoutingResponse(routing)) {
+    AERROR << "Failed to update routing in pnc map";
+    return false;
+  }
   has_routing_ = true;
+  return true;
+}
+
+bool ReferenceLineProvider::UpdateVehicleState(
+    const VehicleState &vehicle_state) {
+  std::lock_guard<std::mutex> lock(pnc_map_mutex_);
+  vehicle_state_ = vehicle_state;
+  if (!pnc_map_->UpdateVehicleState(vehicle_state_)) {
+    AERROR << "PncMap failed to update vehicle state: "
+           << vehicle_state_.ShortDebugString();
+    return false;
+  }
+  return true;
 }
 
 bool ReferenceLineProvider::Start() {
@@ -64,117 +87,109 @@ bool ReferenceLineProvider::Start() {
     AERROR << "ReferenceLineProvider has NOT been initiated.";
     return false;
   }
-  thread_.reset(new std::thread(&ReferenceLineProvider::Generate, this));
+  if (FLAGS_enable_reference_line_provider_thread) {
+    thread_.reset(
+        new std::thread(&ReferenceLineProvider::GenerateThread, this));
+  }
   return true;
 }
 
 void ReferenceLineProvider::Stop() {
   is_stop_ = true;
-  if (thread_ && thread_->joinable()) {
+  if (FLAGS_enable_reference_line_provider_thread && thread_ &&
+      thread_->joinable()) {
     thread_->join();
   }
 }
 
-void ReferenceLineProvider::Generate() {
+void ReferenceLineProvider::GenerateThread() {
+  constexpr int32_t kSleepTime = 200;  // milliseconds
+  constexpr size_t kMaxStoredReferenceLineGroups = 3;
   while (!is_stop_) {
-    const auto &curr_adc_position =
-        common::VehicleState::instance()->pose().position();
-    const auto adc_point_enu = common::util::MakePointENU(
-        curr_adc_position.x(), curr_adc_position.y(), curr_adc_position.z());
+    std::this_thread::sleep_for(
+        std::chrono::duration<double, std::milli>(kSleepTime));
     if (!has_routing_) {
       AERROR << "Routing is not ready.";
-      constexpr int32_t kRoutingNotReadySleepTimeMs = 500;  // milliseconds
-      std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(
-          kRoutingNotReadySleepTimeMs));
       continue;
     }
-    if (!CreateReferenceLineFromRouting(adc_point_enu)) {
-      AERROR << "Fail to create reference line at position: "
-             << curr_adc_position.ShortDebugString();
+    std::list<ReferenceLine> reference_lines;
+    std::list<hdmap::RouteSegments> segments;
+    if (!CreateReferenceLineFromRouting(&reference_lines, &segments)) {
+      AERROR << "Fail to get reference line";
+      continue;
     }
-    ADEBUG << "ReferenceLine smoothed with adc position: "
-           << curr_adc_position.ShortDebugString();
-
-    constexpr int32_t kReferenceLineProviderSleepTime = 200;
-    std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(
-        kReferenceLineProviderSleepTime));
+    std::unique_lock<std::mutex> lock(reference_line_groups_mutex_);
+    reference_line_groups_.emplace_back(reference_lines);
+    route_segment_groups_.emplace_back(segments);
+    while (reference_line_groups_.size() > kMaxStoredReferenceLineGroups) {
+      reference_line_groups_.pop_front();
+      route_segment_groups_.pop_front();
+    }
+    lock.unlock();
+    cv_has_reference_line_.notify_one();
   }
-}
-
-bool ReferenceLineProvider::HasReferenceLine() {
-  std::lock_guard<std::mutex> lock(reference_line_groups_mutex_);
-  return !reference_line_groups_.empty();
 }
 
 bool ReferenceLineProvider::GetReferenceLines(
     std::list<ReferenceLine> *reference_lines,
     std::list<hdmap::RouteSegments> *segments) {
-  // TODO(all): implement this function using the current adc position and the
-  // existing reference lines. It is required that the current reference lines
-  // can cover thoroughly the current adc position so that planning can be make
-  // with a minimum planning distance of 100 meters ahead and 10 meters
-  // backward.
   CHECK_NOTNULL(reference_lines);
   CHECK_NOTNULL(segments);
-  std::lock_guard<std::mutex> lock(reference_line_groups_mutex_);
-  if (reference_line_groups_.empty()) {
-    return false;
+  if (FLAGS_enable_reference_line_provider_thread) {
+    std::unique_lock<std::mutex> lock(reference_line_groups_mutex_);
+    cv_has_reference_line_.wait(
+        lock, [this]() { return !reference_line_groups_.empty(); });
+    reference_lines->assign(reference_line_groups_.back().begin(),
+                            reference_line_groups_.back().end());
+    segments->assign(route_segment_groups_.back().begin(),
+                     route_segment_groups_.back().end());
+    lock.unlock();
+    return true;
+  } else {
+    return CreateReferenceLineFromRouting(reference_lines, segments);
   }
-  reference_lines->assign(reference_line_groups_.back().begin(),
-                          reference_line_groups_.back().end());
-  segments->assign(route_segment_groups_.back().begin(),
-                   route_segment_groups_.back().end());
-  return true;
+}
+
+void ReferenceLineProvider::PrioritzeChangeLane(
+    std::vector<hdmap::RouteSegments> *route_segments) {
+  CHECK_NOTNULL(route_segments);
+  for (std::size_t i = 1; i < route_segments->size(); ++i) {
+    if (!route_segments->at(i).IsOnSegment()) {
+      std::swap(route_segments->at(0), route_segments->at(i));
+      break;
+    }
+  }
 }
 
 bool ReferenceLineProvider::CreateReferenceLineFromRouting(
-    const common::PointENU &position) {
+    std::list<ReferenceLine> *reference_lines,
+    std::list<hdmap::RouteSegments> *segments) {
   std::vector<hdmap::RouteSegments> route_segments;
-
-  const auto &adc_speed = common::VehicleState::instance()->linear_velocity();
-  double look_forward_distance = (adc_speed * FLAGS_look_forward_time_sec >
-                                  FLAGS_look_forward_min_distance)
-                                     ? FLAGS_look_forward_distance
-                                     : FLAGS_look_forward_min_distance;
+  double look_forward_distance =
+      (vehicle_state_.linear_velocity() * FLAGS_look_forward_time_sec >
+       FLAGS_look_forward_min_distance)
+          ? FLAGS_look_forward_distance
+          : FLAGS_look_forward_min_distance;
   {
     std::lock_guard<std::mutex> lock(pnc_map_mutex_);
-    if (!pnc_map_->UpdatePosition(position)) {
-      AERROR << "Failed to update pnc_map position: "
-             << position.ShortDebugString();
-      return false;
-    }
     if (!pnc_map_->GetRouteSegments(FLAGS_look_backward_distance,
                                     look_forward_distance, &route_segments)) {
       AERROR << "Failed to extract segments from routing";
       return false;
     }
   }
-
-  ReferenceLineSmoother smoother;
-  smoother.Init(smoother_config_);
-
-  SpiralReferenceLineSmoother spiral_smoother;
-  double max_spiral_smoother_dev = 0.1;
-  spiral_smoother.set_max_point_deviation(max_spiral_smoother_dev);
-
-  std::vector<ReferenceLine> reference_lines;
-  std::vector<hdmap::RouteSegments> segments;
+  if (FLAGS_prioritize_change_lane) {
+    PrioritzeChangeLane(&route_segments);
+  }
   for (const auto &lanes : route_segments) {
     hdmap::Path hdmap_path;
     hdmap::PncMap::CreatePathFromLaneSegments(lanes, &hdmap_path);
     if (FLAGS_enable_smooth_reference_line) {
       ReferenceLine raw_reference_line(hdmap_path);
       ReferenceLine reference_line;
-      if (FLAGS_enable_spiral_reference_line) {
-        if (!spiral_smoother.Smooth(raw_reference_line, &reference_line)) {
-          AERROR << "Failed to smooth reference_line with spiral smoother";
-        }
-      } else {
-        if (!smoother.Smooth(raw_reference_line, &reference_line,
-                             spline_solver_.get())) {
-          AERROR << "Failed to smooth reference line";
-          continue;
-        }
+      if (!smoother_->Smooth(raw_reference_line, &reference_line)) {
+        AERROR << "Failed to smooth reference line";
+        continue;
       }
 
       bool is_valid_reference_line = true;
@@ -194,29 +209,18 @@ bool ReferenceLineProvider::CreateReferenceLineFromRouting(
         }
       }
       if (is_valid_reference_line) {
-        reference_lines.push_back(std::move(reference_line));
-        segments.emplace_back(lanes);
+        reference_lines->emplace_back(std::move(reference_line));
+        segments->emplace_back(lanes);
       }
     } else {
-      reference_lines.emplace_back(hdmap_path);
-      segments.emplace_back(lanes);
+      reference_lines->emplace_back(hdmap_path);
+      segments->emplace_back(lanes);
     }
   }
 
-  if (reference_lines.empty()) {
+  if (reference_lines->empty()) {
     AERROR << "No smooth reference lines available";
     return false;
-  }
-
-  if (!reference_lines.empty()) {
-    std::lock_guard<std::mutex> lock(reference_line_groups_mutex_);
-    reference_line_groups_.emplace_back(reference_lines);
-    route_segment_groups_.emplace_back(route_segments);
-    const size_t kMaxStoredReferenceLineGroups = 3;
-    while (reference_line_groups_.size() > kMaxStoredReferenceLineGroups) {
-      reference_line_groups_.pop_front();
-      route_segment_groups_.pop_front();
-    }
   }
 
   return true;
