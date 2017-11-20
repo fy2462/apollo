@@ -7,6 +7,12 @@ cc_library(
     hdrs = [
         "indexed_list.h",
     ],
+    linkopts = [
+        "-lboost_thread",
+    ],
+    deps = [
+        "//modules/common/util:map_util",
+    ],
 )
 
 cc_test(
@@ -26,6 +32,9 @@ cc_library(
     name = "indexed_queue",
     hdrs = [
         "indexed_queue.h",
+    ],
+    deps = [
+        "//modules/common/util:map_util",
     ],
 )
 
@@ -99,6 +108,7 @@ cc_library(
         ":indexed_list",
         ":obstacle",
         "//modules/common/configs:vehicle_config_helper",
+        "//modules/common/util:map_util",
         "//modules/planning/common/speed:st_boundary",
         "//modules/planning/proto:planning_proto",
         "//modules/planning/reference_line",

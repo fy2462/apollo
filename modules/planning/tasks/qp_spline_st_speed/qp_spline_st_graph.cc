@@ -78,9 +78,27 @@ void QpSplineStGraph::SetDebugLogger(
 }
 
 Status QpSplineStGraph::Search(const StGraphData& st_graph_data,
-                               SpeedData* const speed_data,
-                               const std::pair<double, double>& accel_bound) {
+                               const std::pair<double, double>& accel_bound,
+                               const SpeedData& reference_speed_data,
+                               SpeedData* const speed_data) {
+  constexpr double kBounadryEpsilon = 1e-2;
+  for (auto boundary : st_graph_data.st_boundaries()) {
+    if (boundary->IsPointInBoundary({0.0, 0.0}) ||
+        (std::fabs(boundary->min_t()) < kBounadryEpsilon &&
+         std::fabs(boundary->min_s()) < kBounadryEpsilon)) {
+      speed_data->Clear();
+      const double t_output_resolution = FLAGS_trajectory_time_min_interval;
+      double time = 0.0;
+      while (time < qp_st_speed_config_.total_time() + t_output_resolution) {
+        speed_data->AppendSpeedPoint(0.0, time, 0.0, 0.0, 0.0);
+        time += t_output_resolution;
+      }
+      return Status::OK();
+    }
+  }
+
   cruise_.clear();
+  reference_dp_speed_points_ = speed_data->speed_vector();
 
   init_point_ = st_graph_data.init_point();
   ADEBUG << "init point:" << init_point_.DebugString();
@@ -90,7 +108,7 @@ Status QpSplineStGraph::Search(const StGraphData& st_graph_data,
       t_knots_, qp_st_speed_config_.qp_spline_config().spline_order());
 
   if (!AddConstraint(st_graph_data.init_point(), st_graph_data.speed_limit(),
-                       st_graph_data.st_boundaries(), accel_bound)
+                     st_graph_data.st_boundaries(), accel_bound)
            .ok()) {
     const std::string msg = "Add constraint failed!";
     AERROR << msg;
@@ -114,11 +132,11 @@ Status QpSplineStGraph::Search(const StGraphData& st_graph_data,
   speed_data->Clear();
   const Spline1d& spline = spline_generator_->spline();
 
-  const double t_output_resolution = FLAGS_output_trajectory_time_resolution;
+  const double t_output_resolution = FLAGS_trajectory_time_min_interval;
   double time = 0.0;
   while (time < qp_st_speed_config_.total_time() + t_output_resolution) {
     double s = spline(time);
-    double v = spline.Derivative(time);
+    double v = std::max(0.0, spline.Derivative(time));
     double a = spline.SecondOrderDerivative(time);
     double da = spline.ThirdOrderDerivative(time);
     speed_data->AppendSpeedPoint(s, time, v, a, da);
@@ -281,6 +299,11 @@ Status QpSplineStGraph::AddKernel(
     return Status(ErrorCode::PLANNING_ERROR, "QpSplineStGraph::AddKernel");
   }
 
+  if (!AddDpStReferenceKernel(
+          qp_st_speed_config_.qp_spline_config().dp_st_reference_weight())) {
+    return Status(ErrorCode::PLANNING_ERROR, "QpSplineStGraph::AddKernel");
+  }
+
   (*spline_kernel->mutable_kernel_matrix())(2, 2) +=
       2.0 * 4.0 * qp_st_speed_config_.qp_spline_config().jerk_kernel_weight();
   (*spline_kernel->mutable_offset())(2, 0) +=
@@ -385,6 +408,21 @@ Status QpSplineStGraph::AddFollowReferenceLineKernel(
            << " Relative time: " << filtered_evaluate_t[i] << std::endl;
   }
   return Status::OK();
+}
+
+bool QpSplineStGraph::AddDpStReferenceKernel(const double weight) const {
+  std::vector<double> t_pos;
+  std::vector<double> s_pos;
+  for (auto point : reference_dp_speed_points_) {
+    t_pos.push_back(point.t());
+    s_pos.push_back(point.s());
+  }
+  auto* spline_kernel = spline_generator_->mutable_spline_kernel();
+  if (!t_pos.empty()) {
+    spline_kernel->AddReferenceLineKernelMatrix(
+        t_pos, s_pos, weight * qp_st_speed_config_.total_time() / t_pos.size());
+  }
+  return true;
 }
 
 Status QpSplineStGraph::GetSConstraintByTime(

@@ -71,6 +71,10 @@ void Frame::CreatePredictionObstacles(
   }
 }
 
+const common::VehicleState &Frame::vehicle_state() const {
+  return vehicle_state_;
+}
+
 bool Frame::Rerouting() {
   auto *adapter_manager = AdapterManager::instance();
   if (adapter_manager->GetRoutingResponse()->Empty()) {
@@ -108,16 +112,6 @@ std::list<ReferenceLineInfo> &Frame::reference_line_info() {
 bool Frame::InitReferenceLineInfo() {
   std::list<ReferenceLine> reference_lines;
   std::list<hdmap::RouteSegments> segments;
-  // Update reference line provider
-  if (!ReferenceLineProvider::instance()->UpdateRoutingResponse(
-          AdapterManager::GetRoutingResponse()->GetLatestObserved())) {
-    AERROR << "Failed to update routing in reference line provider";
-    return false;
-  }
-  if (!ReferenceLineProvider::instance()->UpdateVehicleState(vehicle_state_)) {
-    AERROR << "Failed to update vehicle state in reference line provider";
-    return false;
-  }
   if (!ReferenceLineProvider::instance()->GetReferenceLines(&reference_lines,
                                                             &segments)) {
     AERROR << "Failed to create reference line";
@@ -315,8 +309,9 @@ void Frame::AddObstacle(const Obstacle &obstacle) {
 const ReferenceLineInfo *Frame::FindDriveReferenceLineInfo() {
   double min_cost = std::numeric_limits<double>::infinity();
   for (const auto &reference_line_info : reference_line_info_) {
-    if (reference_line_info.IsDrivable() &&
-        reference_line_info.Cost() < min_cost) {
+    if (reference_line_info.ReachedDestination() ||
+        (reference_line_info.IsDrivable() &&
+         reference_line_info.Cost() < min_cost)) {
       drive_reference_line_info_ = &reference_line_info;
       min_cost = reference_line_info.Cost();
     }

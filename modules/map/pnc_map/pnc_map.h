@@ -15,13 +15,14 @@
  *****************************************************************************/
 
 /**
- * @file: pnc_map.h
+ * @file:
  **/
 
 #ifndef MODULES_MAP_PNC_MAP_PNC_MAP_H_
 #define MODULES_MAP_PNC_MAP_PNC_MAP_H_
 
 #include <limits>
+#include <list>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -35,132 +36,11 @@
 
 #include "modules/map/hdmap/hdmap.h"
 #include "modules/map/pnc_map/path.h"
+#include "modules/map/pnc_map/route_segments.h"
 
 namespace apollo {
 namespace hdmap {
 
-/**
- * @brief class RouteSegments
- *
- * This class is a representation of the Passage type in routing.proto.
- * It is exended from a passage region, but keeps some properties of the passage
- * such as the last end LaneWaypoint of the original passage region
- * (route_end_waypoint), whether the passage can lead to another passage in
- * routing (can_exit_). This class contains the original data that can be used
- * to generate hdmap::Path
- **/
-  // 数组[车道段]
-class RouteSegments : public std::vector<LaneSegment> {
- public:
-  /**
-   * The default constructor.
-   **/
-  RouteSegments() = default;
-
-  /**
-   * Get the next change lane action need to take by the vehicle, if the vehicle
-   * is on this RouteSegments.
-   * If the vehicle does not need to change lane, then change_lane_type =*
-   * routing::FORWARD;
-   * If the vehicle need to change to left lane according to routing, then
-   * change_lane_type_ =  routing::LEFT;
-   * If the vehicle need to change to right lane according to routing, then
-   * change_lane_type_ = routing::RIGHT;
-   */
-  routing::ChangeLaneType NextAction() const;
-  void SetNextAction(routing::ChangeLaneType action);
-
-  /**
-   * Get the previous change lane action need to take by the vehicle to reach
-   * current segment, if the vehicle is not on this RouteSegments.
-   * this RouteSegment,
-   * If the vehicle is already on this segment, or does not need to change lane
-   * to reach this segment, then change_lane_type = routing::FORWARD;
-   * If the vehicle need to change to left to reach this segment, then
-   * change_lane_type_ =  routing::LEFT;
-   * If the vehicle need to change to right to reach this segment, then
-   * change_lane_type_ = routing::RIGHT;
-   */
-  routing::ChangeLaneType PreviousAction() const;
-  void SetPreviousAction(routing::ChangeLaneType action);
-
-  /**
-   * Wether the passage region that generate this route segment can lead to
-   * another passage region in route.
-   */
-  bool CanExit() const;
-  void SetCanExit(bool can_exit);
-
-  /**
-   * Project a point to this route segment.
-   * @param point_enu a map point.
-   * @param s return the longitudinal s relative to the route segment.
-   * @param l return the lateral distance relative to the route segment.
-   * @param waypoint return the LaneWaypoint, which has lane and lane_s on the
-   * route segment.
-  /** 投影一个点到路由段
-   * Project a point to route segments.
-   * @return false if error happended or projected outside of the lane segments.
-   */
-  bool GetProjection(const common::PointENU &point_enu, double *s, double *l,
-                     LaneWaypoint *waypoint) const;
-
-  /**
-   * Check whether the map allows a vehicle can reach current RouteSegment from
-   * a point on a lane (LaneWaypoint).
-   * @param waypoint the start waypoint
-   * @return true if the map allows a vehicle to drive from waypoint to current
-   * RouteSegment. Otherwise false.
-   */
-  bool CanDriveFrom(const LaneWaypoint &waypoint) const;
-
-  /*
-   * This is the point that is the end of the original passage in routing.
-   * It is used to check if the vehicle is out of current routing.
-   * The LaneWaypoint.lane is nullptr if the end of the passage is not on the
-   * RouteSegment.
-   */
-  const LaneWaypoint &RouteEndWaypoint() const;
-  void SetRouteEndWaypoint(const LaneWaypoint &waypoint);
-
-  bool IsOnSegment() const;
-  void SetIsOnSegment(bool on_segment);
-
-  void SetId(const std::string &id);
-  const std::string &Id() const;
-
-  /**
-   * Get the last waypoint from the lane segments.
-   */
-  LaneWaypoint LastWaypoint() const;
-
-  /**
-   * @brief Check if a waypoint is on segment
-   */
-  bool IsWaypointOnSegment(const LaneWaypoint &waypoint) const;
-
- private:
-  LaneWaypoint route_end_waypoint_;
-
-  /**
-   * wheter this segment can lead to another passage region in routing
-   */
-  bool can_exit_ = false;
-
-  /**
-   * Indicates whether the vehicle is on current RouteSegment.
-   **/
-  bool is_on_segment_ = false;
-
-  routing::ChangeLaneType next_action_ = routing::FORWARD;
-  // 0前 1左 2右 
-
-  routing::ChangeLaneType previous_action_ = routing::FORWARD;
-
-  std::string id_;
-};
-
-// 地图入口类
 class PncMap {
  public:
   virtual ~PncMap() = default;
@@ -170,7 +50,6 @@ class PncMap {
 
   // 这个什么时候调用？
   bool UpdateRoutingResponse(const routing::RoutingResponse &routing_response);
-  bool UpdateVehicleState(const common::VehicleState &vehicle_state);
 
   const routing::RoutingResponse &routing_response() const;
 
@@ -178,16 +57,27 @@ class PncMap {
   static bool CreatePathFromLaneSegments(const RouteSegments &segments,
                                          Path *const path);
 
-  bool GetRouteSegments(const double backward_length,
-  // 根据点生成路由段
-  bool GetRouteSegments(const common::PointENU &point,
+  bool GetRouteSegments(const common::VehicleState &state,
                         const double backward_length,
                         const double forward_length,
-                        std::vector<RouteSegments> *const route_segments) const;
+                        std::list<RouteSegments> *const route_segments) const;
+
+  /**
+   * Check if the routing is the same as existing one after call
+   * UpdateRoutingResponse"
+   */
+  bool IsSameRouting() const;
+
+  bool ExtendSegments(const RouteSegments &segments,
+                      const common::PointENU &point, double look_forward,
+                      double look_backward, RouteSegments *extended_segments);
+
+  bool ExtendSegments(const RouteSegments &segments, double start_s,
+                      double end_s,
+                      RouteSegments *const truncated_segments) const;
 
  private:
-  // 为什么获得点段waypoint？
-  bool GetNearestPointFromRouting(const common::PointENU &point,
+  bool GetNearestPointFromRouting(const common::VehicleState &point,
                                   LaneWaypoint *waypoint) const;
 
   /**
@@ -204,10 +94,6 @@ class PncMap {
   bool ProjectToSegments(const common::PointENU &point_enu,
                          const RouteSegments &segments,
                          LaneWaypoint *waypoint) const;
-
-  bool TruncateLaneSegments(const RouteSegments &segments, double start_s,
-                            double end_s,
-                            RouteSegments *const truncated_segments) const;
 
   static bool ValidateRouting(const routing::RoutingResponse &routing);
 
@@ -231,12 +117,8 @@ class PncMap {
  private:
   routing::RoutingResponse routing_;
   std::unordered_set<std::string> routing_lane_ids_;
-  LaneWaypoint current_waypoint_;
-  common::PointENU current_point_;
-  std::vector<int> route_index_;
-  common::PointENU passage_start_point_;
-  double min_l_to_lane_center_ = std::numeric_limits<double>::max();
   const hdmap::HDMap *hdmap_ = nullptr;
+  bool is_same_routing_ = false;
 };
 
 }  // namespace hdmap

@@ -57,14 +57,20 @@ bool ReferenceLineInfo::Init() {
   const auto& path_point = adc_planning_point_.path_point();
   Vec2d position(path_point.x(), path_point.y());
   Vec2d vec_to_center(
-      (param.left_edge_to_center() - param.right_edge_to_center()) / 2.0,
-      (param.front_edge_to_center() - param.back_edge_to_center()) / 2.0);
+      (param.front_edge_to_center() - param.back_edge_to_center()) / 2.0,
+      (param.left_edge_to_center() - param.right_edge_to_center()) / 2.0);
   Vec2d center(position + vec_to_center.rotate(path_point.theta()));
   common::math::Box2d box(center, path_point.theta(), param.length(),
                           param.width());
   if (!reference_line_.GetSLBoundary(box, &adc_sl_boundary_)) {
     AERROR << "Failed to get ADC boundary from box: " << box.DebugString();
     return false;
+  }
+  if (adc_sl_boundary_.end_s() < 0 ||
+      adc_sl_boundary_.start_s() > reference_line_.Length()) {
+    AWARN << "Vehicle SL " << adc_sl_boundary_.ShortDebugString()
+          << " is not on reference line:[0, " << reference_line_.Length()
+          << "]";
   }
   return true;
 }
@@ -150,16 +156,21 @@ PathData* ReferenceLineInfo::mutable_path_data() { return &path_data_; }
 SpeedData* ReferenceLineInfo::mutable_speed_data() { return &speed_data_; }
 
 bool ReferenceLineInfo::CombinePathAndSpeedProfile(
-    const double time_resolution, const double relative_time,
+    const double relative_time,
     DiscretizedTrajectory* ptr_discretized_trajectory) {
-  CHECK(time_resolution > 0.0);
   CHECK(ptr_discretized_trajectory != nullptr);
+  // use varied resolution to reduce data load but also provide enough data
+  // point for control module
+  const double kDenseTimeResoltuion = FLAGS_trajectory_time_min_interval;
+  const double kSparseTimeResolution = FLAGS_trajectory_time_max_interval;
+  const double kDenseTimeSec = FLAGS_trajectory_time_high_density_period;
   if (path_data_.discretized_path().NumOfPoints() == 0) {
     AWARN << "path data is empty";
     return false;
   }
   for (double cur_rel_time = 0.0; cur_rel_time < speed_data_.TotalTime();
-       cur_rel_time += time_resolution) {
+       cur_rel_time += (cur_rel_time < kDenseTimeSec ? kDenseTimeResoltuion
+                                                     : kSparseTimeResolution)) {
     common::SpeedPoint speed_point;
     if (!speed_data_.EvaluateByTime(cur_rel_time, &speed_point)) {
       AERROR << "Fail to get speed point with relative time " << cur_rel_time;
@@ -252,7 +263,7 @@ void ReferenceLineInfo::ExportTurnSignal(VehicleSignal* signal) const {
 }
 
 bool ReferenceLineInfo::ReachedDestination() const {
-  constexpr double kDestinationDeltaS = 2.0;
+  constexpr double kDestinationDeltaS = 0.05;
   const auto* dest_ptr = path_decision_.Find(FLAGS_destination_obstacle_id);
   if (!dest_ptr) {
     return false;

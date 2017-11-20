@@ -15,6 +15,7 @@ cc_library(
         "util.h",
     ],
     deps = [
+        ":string_util",
         "//modules/common/math",
         "//modules/common/proto:pnc_point_proto",
         "//modules/common/time",
@@ -43,7 +44,9 @@ cc_library(
     name = "string_util",
     hdrs = [
         "string_util.h",
-        "string_util_internal.h",
+    ],
+    deps = [
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -56,6 +59,14 @@ cc_test(
     deps = [
         ":string_util",
         "@gtest//:main",
+    ],
+)
+
+cc_library(
+    name = "map_util",
+    hdrs = ["map_util.h"],
+    deps = [
+        "@com_google_protobuf//:protobuf",
     ],
 )
 

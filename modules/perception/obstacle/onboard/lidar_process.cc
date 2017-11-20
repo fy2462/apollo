@@ -354,9 +354,7 @@ bool LidarProcess::GetVelodyneTrans(const double query_time, Matrix4d* trans) {
   return true;
 }
 
-bool LidarProcess::GeneratePbMsg(PerceptionObstacles* obstacles) {
-  AdapterManager::FillPerceptionObstaclesHeader(FLAGS_obstacle_module_name,
-                                                obstacles);
+void LidarProcess::GeneratePbMsg(PerceptionObstacles* obstacles) {
   common::Header* header = obstacles->mutable_header();
   header->set_lidar_timestamp(timestamp_ * 1e9);  // in ns
   header->set_camera_timestamp(0);
@@ -366,16 +364,11 @@ bool LidarProcess::GeneratePbMsg(PerceptionObstacles* obstacles) {
 
   for (const auto& obj : objects_) {
     PerceptionObstacle* obstacle = obstacles->add_perception_obstacle();
-    if (!obj->Serialize(obstacle)) {
-      AERROR << "Failed gen PerceptionObstacle. Object:" << obj->ToString();
-      return false;
-    }
-    // 精确到S
+    obj->Serialize(obstacle);
     obstacle->set_timestamp(obstacle->timestamp() * 1000);
   }
 
   ADEBUG << "PerceptionObstacles: " << obstacles->ShortDebugString();
-  return true;
 }
 
 }  // namespace perception
